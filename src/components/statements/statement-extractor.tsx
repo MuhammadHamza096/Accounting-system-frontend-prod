@@ -4,6 +4,10 @@ import { Loader2 } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
 
+import {
+  BalanceOptionsDialog,
+  type BalanceOptions,
+} from "@/components/statements/balance-options-dialog";
 import { DownloadMenu } from "@/components/statements/download-menu";
 import { FileDropzone } from "@/components/statements/file-dropzone";
 import { TransactionsTable } from "@/components/statements/transactions-table";
@@ -18,56 +22,127 @@ import {
 } from "@/components/ui/card";
 import {
   extractStatement,
+  type ExtractResponse,
   type StatementType,
   type Transaction,
 } from "@/lib/api";
+import { buildLedgerRows, pickExtractedBalances, type LedgerRow } from "@/lib/ledger";
+
+/** Process files in fixed batches of 3 (wait for each batch to finish). */
+const BATCH_SIZE = 3;
+
+async function runBatches<T>(
+  items: T[],
+  batchSize: number,
+  worker: (item: T) => Promise<void>
+): Promise<void> {
+  for (let i = 0; i < items.length; i += batchSize) {
+    const batch = items.slice(i, i + batchSize);
+    await Promise.all(batch.map((item) => worker(item)));
+  }
+}
 
 export function StatementExtractor() {
   const [files, setFiles] = useState<File[]>([]);
-  const [transactions, setTransactions] = useState<Transaction[]>([]);
+  const [rows, setRows] = useState<LedgerRow[]>([]);
   const [statementType, setStatementType] = useState<StatementType | null>(null);
   const [processing, setProcessing] = useState(false);
   const [progress, setProgress] = useState<{ current: number; total: number } | null>(
     null
   );
+  const [dialogOpen, setDialogOpen] = useState(false);
 
-  const processFiles = async () => {
+  const applyLedger = (
+    collected: Transaction[],
+    extracts: ExtractResponse[],
+    options: BalanceOptions
+  ) => {
+    const extracted = pickExtractedBalances(extracts);
+    const opening = options.source === "user" ? options.opening : extracted.opening;
+    const closing = options.source === "user" ? options.closing : extracted.closing;
+    setRows(buildLedgerRows({ transactions: collected, opening, closing }));
+    return { opening, closing };
+  };
+
+  const processFiles = async (options: BalanceOptions) => {
     if (files.length === 0) {
       toast.error("Add at least one PDF or Excel file");
       return;
     }
 
     setProcessing(true);
-    setTransactions([]);
+    setRows([]);
     setStatementType(null);
     setProgress({ current: 0, total: files.length });
 
-    let expectedType: StatementType | undefined;
     const collected: Transaction[] = [];
+    const extracts: ExtractResponse[] = [];
+    let completed = 0;
+    let lockedType: StatementType | undefined;
+    let failed = false;
 
     try {
-      for (let i = 0; i < files.length; i++) {
-        const file = files[i];
-        setProgress({ current: i + 1, total: files.length });
+      const first = await extractStatement(files[0]);
+      lockedType = first.statement_type;
+      setStatementType(first.statement_type);
+      collected.push(...first.transactions);
+      extracts.push(first);
+      applyLedger(collected, extracts, options);
+      completed = 1;
+      setProgress({ current: completed, total: files.length });
 
+      const rest = files.slice(1);
+      if (rest.length === 0) {
+        const { opening } = applyLedger(collected, extracts, options);
+        if (options.source === "system" && opening == null) {
+          toast.error(
+            "Could not find an opening balance on the statement. Enter it manually, or check the file."
+          );
+        } else {
+          toast.success(
+            `Extracted ${collected.length} transaction${collected.length === 1 ? "" : "s"}`
+          );
+        }
+        return;
+      }
+
+      await runBatches(rest, BATCH_SIZE, async (file) => {
+        if (failed) {
+          return;
+        }
         try {
-          const result = await extractStatement(file, expectedType);
-          expectedType = result.statement_type;
-          setStatementType(result.statement_type);
+          const result = await extractStatement(file, lockedType);
           collected.push(...result.transactions);
-          setTransactions([...collected]);
+          extracts.push(result);
+          applyLedger(collected, extracts, options);
         } catch (err) {
+          failed = true;
           const message = err instanceof Error ? err.message : "Extraction failed";
           toast.error(message);
-          break;
+          throw err;
+        } finally {
+          completed += 1;
+          setProgress({ current: Math.min(completed, files.length), total: files.length });
+        }
+      }).catch(() => {
+        // Error already toasted above.
+      });
+
+      if (!failed && collected.length > 0) {
+        const { opening } = applyLedger(collected, extracts, options);
+        if (options.source === "system" && opening == null) {
+          toast.error(
+            "Could not find an opening balance on the statement. Enter it manually, or check the file."
+          );
+        } else {
+          toast.success(
+            `Extracted ${collected.length} transaction${collected.length === 1 ? "" : "s"}`
+          );
         }
       }
-
-      if (collected.length > 0) {
-        toast.success(
-          `Extracted ${collected.length} transaction${collected.length === 1 ? "" : "s"}`
-        );
-      }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Extraction failed";
+      toast.error(message);
     } finally {
       setProcessing(false);
       setProgress(null);
@@ -81,8 +156,8 @@ export function StatementExtractor() {
           Statement Extractor
         </h1>
         <p className="text-muted-foreground text-sm">
-          Upload bank or credit card statements (PDF / Excel). Files are processed
-          one by one with GPT and shown in a single table.
+          Upload bank or credit card statements (PDF / Excel). Files are
+          extracted in batches of {BATCH_SIZE} and merged into one table.
         </p>
       </div>
 
@@ -91,7 +166,7 @@ export function StatementExtractor() {
           <CardTitle className="text-base">Upload statements</CardTitle>
           <CardDescription>
             All files in a batch must be the same type (all bank or all credit
-            card).
+            card). Extraction runs {BATCH_SIZE} files at a time.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
@@ -101,7 +176,10 @@ export function StatementExtractor() {
             disabled={processing}
           />
           <div className="flex flex-wrap items-center gap-3">
-            <Button onClick={processFiles} disabled={processing || files.length === 0}>
+            <Button
+              onClick={() => setDialogOpen(true)}
+              disabled={processing || files.length === 0}
+            >
               {processing && <Loader2 className="size-4 animate-spin" />}
               {processing
                 ? `Processing ${progress?.current ?? 0}/${progress?.total ?? 0}…`
@@ -112,7 +190,7 @@ export function StatementExtractor() {
                 variant="ghost"
                 onClick={() => {
                   setFiles([]);
-                  setTransactions([]);
+                  setRows([]);
                   setStatementType(null);
                 }}
               >
@@ -133,20 +211,30 @@ export function StatementExtractor() {
                   {statementType === "bank" ? "Bank" : "Credit card"}
                 </Badge>
               )}
-              {transactions.length > 0 && (
-                <Badge variant="outline">{transactions.length} rows</Badge>
+              {rows.length > 0 && (
+                <Badge variant="outline">{rows.length} rows</Badge>
               )}
             </div>
             <CardDescription>
-              Withdrawals show as (amount). Deposits show without brackets.
+              Rows are sorted by date. Balance is opening − withdrawals + deposits.
+              Negatives show in parentheses, e.g. (6,553.00).
             </CardDescription>
           </div>
-          <DownloadMenu transactions={transactions} disabled={processing} />
+          <DownloadMenu rows={rows} disabled={processing} />
         </CardHeader>
         <CardContent>
-          <TransactionsTable transactions={transactions} />
+          <TransactionsTable rows={rows} />
         </CardContent>
       </Card>
+
+      <BalanceOptionsDialog
+        open={dialogOpen}
+        onOpenChange={setDialogOpen}
+        onConfirm={(options) => {
+          setDialogOpen(false);
+          void processFiles(options);
+        }}
+      />
     </div>
   );
 }

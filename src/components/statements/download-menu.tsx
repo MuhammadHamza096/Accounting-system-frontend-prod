@@ -9,16 +9,16 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import type { Transaction } from "@/lib/api";
 import { downloadCsv, downloadExcel, downloadPdf } from "@/lib/download";
+import type { LedgerRow } from "@/lib/ledger";
 
 type Props = {
-  transactions: Transaction[];
+  rows: LedgerRow[];
   disabled?: boolean;
 };
 
-export function DownloadMenu({ transactions, disabled }: Props) {
-  const empty = transactions.length === 0;
+export function DownloadMenu({ rows, disabled }: Props) {
+  const empty = rows.length === 0;
 
   return (
     <DropdownMenu>
@@ -30,13 +30,13 @@ export function DownloadMenu({ transactions, disabled }: Props) {
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end">
-        <DropdownMenuItem onClick={() => downloadExcel(transactions)}>
+        <DropdownMenuItem onClick={() => downloadExcel(rows)}>
           Excel (.xlsx)
         </DropdownMenuItem>
-        <DropdownMenuItem onClick={() => downloadPdf(transactions)}>
+        <DropdownMenuItem onClick={() => downloadPdf(rows)}>
           PDF (.pdf)
         </DropdownMenuItem>
-        <DropdownMenuItem onClick={() => downloadCsv(transactions)}>
+        <DropdownMenuItem onClick={() => downloadCsv(rows)}>
           CSV (.csv)
         </DropdownMenuItem>
       </DropdownMenuContent>

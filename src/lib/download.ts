@@ -2,17 +2,21 @@ import { jsPDF } from "jspdf";
 import autoTable from "jspdf-autotable";
 import * as XLSX from "xlsx";
 
-import type { Transaction } from "@/lib/api";
-import { formatAmount, formatMoney } from "@/lib/format";
+import { formatAmount, formatMoney, formatSignedAmount } from "@/lib/format";
+import type { LedgerRow } from "@/lib/ledger";
 
-function toRows(transactions: Transaction[]) {
-  return transactions.map((t) => ({
-    Date: t.date,
-    Description: t.description,
-    Deposit: t.deposit != null ? formatMoney(t.deposit) : "",
-    Withdrawal: t.withdrawal != null ? formatMoney(t.withdrawal) : "",
-    Amount: formatAmount(t.deposit, t.withdrawal),
-    Source: t.source_file,
+function toRows(rows: LedgerRow[]) {
+  return rows.map((row) => ({
+    Source: row.source_file,
+    Date: row.date,
+    Description: row.description,
+    Deposit: row.deposit != null ? formatMoney(row.deposit) : "",
+    Withdrawal: row.withdrawal != null ? formatMoney(row.withdrawal) : "",
+    Amount:
+      row.kind === "opening" || row.kind === "closing"
+        ? ""
+        : formatAmount(row.deposit, row.withdrawal),
+    Balance: formatSignedAmount(row.running_balance),
   }));
 }
 
@@ -25,22 +29,30 @@ function downloadBlob(filename: string, blob: Blob) {
   URL.revokeObjectURL(url);
 }
 
-export function downloadCsv(transactions: Transaction[], filename = "statements.csv") {
-  const rows = toRows(transactions);
-  const headers = ["Date", "Description", "Deposit", "Withdrawal", "Amount", "Source"];
+export function downloadCsv(rows: LedgerRow[], filename = "statements.csv") {
+  const data = toRows(rows);
+  const headers = [
+    "Source",
+    "Date",
+    "Description",
+    "Deposit",
+    "Withdrawal",
+    "Amount",
+    "Balance",
+  ];
   const escape = (value: string) => `"${value.replaceAll('"', '""')}"`;
   const lines = [
     headers.join(","),
-    ...rows.map((row) =>
+    ...data.map((row) =>
       headers.map((h) => escape(String(row[h as keyof typeof row] ?? ""))).join(",")
     ),
   ];
   downloadBlob(filename, new Blob([lines.join("\n")], { type: "text/csv;charset=utf-8" }));
 }
 
-export function downloadExcel(transactions: Transaction[], filename = "statements.xlsx") {
-  const rows = toRows(transactions);
-  const sheet = XLSX.utils.json_to_sheet(rows);
+export function downloadExcel(rows: LedgerRow[], filename = "statements.xlsx") {
+  const data = toRows(rows);
+  const sheet = XLSX.utils.json_to_sheet(data);
   const book = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(book, sheet, "Transactions");
   const buffer = XLSX.write(book, { bookType: "xlsx", type: "array" });
@@ -52,21 +64,26 @@ export function downloadExcel(transactions: Transaction[], filename = "statement
   );
 }
 
-export function downloadPdf(transactions: Transaction[], filename = "statements.pdf") {
+export function downloadPdf(rows: LedgerRow[], filename = "statements.pdf") {
   const doc = new jsPDF({ orientation: "landscape" });
   doc.setFontSize(14);
   doc.text("Statement Transactions", 14, 16);
 
   autoTable(doc, {
     startY: 22,
-    head: [["Date", "Description", "Deposit", "Withdrawal", "Amount", "Source"]],
-    body: transactions.map((t) => [
-      t.date,
-      t.description,
-      t.deposit != null ? formatMoney(t.deposit) : "",
-      t.withdrawal != null ? formatMoney(t.withdrawal) : "",
-      formatAmount(t.deposit, t.withdrawal),
-      t.source_file,
+    head: [
+      ["Source", "Date", "Description", "Deposit", "Withdrawal", "Amount", "Balance"],
+    ],
+    body: rows.map((row) => [
+      row.source_file,
+      row.date,
+      row.description,
+      row.deposit != null ? formatMoney(row.deposit) : "",
+      row.withdrawal != null ? formatMoney(row.withdrawal) : "",
+      row.kind === "opening" || row.kind === "closing"
+        ? ""
+        : formatAmount(row.deposit, row.withdrawal),
+      formatSignedAmount(row.running_balance),
     ]),
     styles: { fontSize: 8, cellPadding: 2 },
     headStyles: { fillColor: [33, 33, 33] },

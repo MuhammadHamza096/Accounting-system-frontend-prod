@@ -6,6 +6,13 @@ export function formatMoney(value: number | null | undefined): string {
   });
 }
 
+/** Negatives always in parentheses: (6,553.00) */
+export function formatSignedAmount(value: number | null | undefined): string {
+  if (value == null || Number.isNaN(value)) return "";
+  if (value < 0) return `(${formatMoney(Math.abs(value))})`;
+  return formatMoney(value);
+}
+
 /** Deposit shown plain; withdrawal shown in parentheses e.g. (50.00) */
 export function formatAmount(
   deposit: number | null | undefined,

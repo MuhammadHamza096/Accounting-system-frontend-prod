@@ -12,6 +12,8 @@ export type Transaction = {
 
 export type ExtractResponse = {
   statement_type: StatementType;
+  opening_balance: number | null;
+  closing_balance: number | null;
   transactions: Transaction[];
 };
 
