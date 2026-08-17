@@ -1,5 +1,5 @@
 import type { ExtractResponse, Transaction } from "@/lib/api";
-import { parseDate } from "@/lib/dates";
+import { normalizeDateString, parseDate } from "@/lib/dates";
 
 export type LedgerKind = "opening" | "transaction" | "closing";
 
@@ -9,7 +9,12 @@ export type LedgerRow = Transaction & {
 };
 
 export function sortTransactions(transactions: Transaction[]): Transaction[] {
-  return transactions
+  const normalized = transactions.map((row) => ({
+    ...row,
+    date: normalizeDateString(row.date),
+  }));
+
+  return normalized
     .map((row, index) => ({ row, index, date: parseDate(row.date) }))
     .sort((a, b) => {
       if (a.date && b.date) {

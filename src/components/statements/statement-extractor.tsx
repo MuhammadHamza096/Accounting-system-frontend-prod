@@ -21,131 +21,61 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import {
-  extractStatement,
-  type ExtractResponse,
+  extractStatements,
   type StatementType,
-  type Transaction,
 } from "@/lib/api";
-import { buildLedgerRows, pickExtractedBalances, type LedgerRow } from "@/lib/ledger";
-
-/** Process files in fixed batches of 3 (wait for each batch to finish). */
-const BATCH_SIZE = 3;
-
-async function runBatches<T>(
-  items: T[],
-  batchSize: number,
-  worker: (item: T) => Promise<void>
-): Promise<void> {
-  for (let i = 0; i < items.length; i += batchSize) {
-    const batch = items.slice(i, i + batchSize);
-    await Promise.all(batch.map((item) => worker(item)));
-  }
-}
+import { buildLedgerRows, type LedgerRow } from "@/lib/ledger";
 
 export function StatementExtractor() {
   const [files, setFiles] = useState<File[]>([]);
   const [rows, setRows] = useState<LedgerRow[]>([]);
   const [statementType, setStatementType] = useState<StatementType | null>(null);
   const [processing, setProcessing] = useState(false);
-  const [progress, setProgress] = useState<{ current: number; total: number } | null>(
-    null
-  );
   const [dialogOpen, setDialogOpen] = useState(false);
-
-  const applyLedger = (
-    collected: Transaction[],
-    extracts: ExtractResponse[],
-    options: BalanceOptions
-  ) => {
-    const extracted = pickExtractedBalances(extracts);
-    const opening = options.source === "user" ? options.opening : extracted.opening;
-    const closing = options.source === "user" ? options.closing : extracted.closing;
-    setRows(buildLedgerRows({ transactions: collected, opening, closing }));
-    return { opening, closing };
-  };
 
   const processFiles = async (options: BalanceOptions) => {
     if (files.length === 0) {
-      toast.error("Add at least one PDF or Excel file");
+      toast.error("Add at least one PDF, Excel, or CSV file");
       return;
     }
 
     setProcessing(true);
     setRows([]);
     setStatementType(null);
-    setProgress({ current: 0, total: files.length });
-
-    const collected: Transaction[] = [];
-    const extracts: ExtractResponse[] = [];
-    let completed = 0;
-    let lockedType: StatementType | undefined;
-    let failed = false;
 
     try {
-      const first = await extractStatement(files[0]);
-      lockedType = first.statement_type;
-      setStatementType(first.statement_type);
-      collected.push(...first.transactions);
-      extracts.push(first);
-      applyLedger(collected, extracts, options);
-      completed = 1;
-      setProgress({ current: completed, total: files.length });
+      const result = await extractStatements(files);
+      setStatementType(result.statement_type);
 
-      const rest = files.slice(1);
-      if (rest.length === 0) {
-        const { opening } = applyLedger(collected, extracts, options);
-        if (options.source === "system" && opening == null) {
-          toast.error(
-            "Could not find an opening balance on the statement. Enter it manually, or check the file."
-          );
-        } else {
-          toast.success(
-            `Extracted ${collected.length} transaction${collected.length === 1 ? "" : "s"}`
-          );
-        }
-        return;
-      }
+      const opening =
+        options.source === "user" ? options.opening : result.opening_balance;
+      const closing =
+        options.source === "user" ? options.closing : result.closing_balance;
 
-      await runBatches(rest, BATCH_SIZE, async (file) => {
-        if (failed) {
-          return;
-        }
-        try {
-          const result = await extractStatement(file, lockedType);
-          collected.push(...result.transactions);
-          extracts.push(result);
-          applyLedger(collected, extracts, options);
-        } catch (err) {
-          failed = true;
-          const message = err instanceof Error ? err.message : "Extraction failed";
-          toast.error(message);
-          throw err;
-        } finally {
-          completed += 1;
-          setProgress({ current: Math.min(completed, files.length), total: files.length });
-        }
-      }).catch(() => {
-        // Error already toasted above.
-      });
+      setRows(
+        buildLedgerRows({
+          transactions: result.transactions,
+          opening,
+          closing,
+        })
+      );
 
-      if (!failed && collected.length > 0) {
-        const { opening } = applyLedger(collected, extracts, options);
-        if (options.source === "system" && opening == null) {
-          toast.error(
-            "Could not find an opening balance on the statement. Enter it manually, or check the file."
-          );
-        } else {
-          toast.success(
-            `Extracted ${collected.length} transaction${collected.length === 1 ? "" : "s"}`
-          );
-        }
+      if (options.source === "system" && opening == null) {
+        toast.error(
+          "Could not find an opening balance on the statement. Enter it manually, or check the file."
+        );
+      } else {
+        toast.success(
+          `Extracted ${result.transactions.length} transaction${
+            result.transactions.length === 1 ? "" : "s"
+          }`
+        );
       }
     } catch (err) {
       const message = err instanceof Error ? err.message : "Extraction failed";
       toast.error(message);
     } finally {
       setProcessing(false);
-      setProgress(null);
     }
   };
 
@@ -156,8 +86,8 @@ export function StatementExtractor() {
           Statement Extractor
         </h1>
         <p className="text-muted-foreground text-sm">
-          Upload bank or credit card statements (PDF / Excel). Files are
-          extracted in batches of {BATCH_SIZE} and merged into one table.
+          Upload bank or credit card statements (PDF / Excel / CSV). Rows are
+          parsed in code, then classified in one agent call.
         </p>
       </div>
 
@@ -166,7 +96,7 @@ export function StatementExtractor() {
           <CardTitle className="text-base">Upload statements</CardTitle>
           <CardDescription>
             All files in a batch must be the same type (all bank or all credit
-            card). Extraction runs {BATCH_SIZE} files at a time.
+            card). Every file is parsed first, then sent together to the agent.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
@@ -181,9 +111,7 @@ export function StatementExtractor() {
               disabled={processing || files.length === 0}
             >
               {processing && <Loader2 className="size-4 animate-spin" />}
-              {processing
-                ? `Processing ${progress?.current ?? 0}/${progress?.total ?? 0}…`
-                : "Extract transactions"}
+              {processing ? "Extracting…" : "Extract transactions"}
             </Button>
             {files.length > 0 && !processing && (
               <Button

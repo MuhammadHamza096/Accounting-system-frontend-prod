@@ -42,6 +42,18 @@ function expandYear(year: number): number {
   return year >= 70 ? 1900 + year : 2000 + year;
 }
 
+function parseUsNumeric(first: number, second: number, yearRaw: number): Date | null {
+  const year = expandYear(yearRaw);
+  if (first > 12) {
+    return utcDate(year, second - 1, first);
+  }
+  if (second > 12) {
+    return utcDate(year, first - 1, second);
+  }
+  // Ambiguous — US bank statements use MM/DD.
+  return utcDate(year, first - 1, second);
+}
+
 export function parseDate(value: string): Date | null {
   const text = value.trim().replace(/\s+/g, " ");
   if (!text) return null;
@@ -51,9 +63,9 @@ export function parseDate(value: string): Date | null {
     return utcDate(Number(iso[1]), Number(iso[2]) - 1, Number(iso[3]));
   }
 
-  const dmy = /^(\d{1,2})[./-](\d{1,2})[./-](\d{2,4})$/.exec(text);
-  if (dmy) {
-    return utcDate(expandYear(Number(dmy[3])), Number(dmy[2]) - 1, Number(dmy[1]));
+  const numeric = /^(\d{1,2})[./-](\d{1,2})[./-](\d{2,4})$/.exec(text);
+  if (numeric) {
+    return parseUsNumeric(Number(numeric[1]), Number(numeric[2]), Number(numeric[3]));
   }
 
   const named = /^(\d{1,2})\s+([A-Za-z]+),?\s+(\d{2,4})$/.exec(text);
@@ -71,4 +83,25 @@ export function parseDate(value: string): Date | null {
   }
 
   return null;
+}
+
+export function formatDateIso(value: Date): string {
+  const year = value.getUTCFullYear();
+  const month = String(value.getUTCMonth() + 1).padStart(2, "0");
+  const day = String(value.getUTCDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+/** Normalize any date string to YYYY-MM-DD when parseable. */
+export function normalizeDateString(value: string): string {
+  const parsed = parseDate(value);
+  if (parsed) return formatDateIso(parsed);
+
+  const embedded = /^(\d{1,2}[./-]\d{1,2}[./-]\d{2,4})/.exec(value.trim());
+  if (embedded) {
+    const fromEmbedded = parseDate(embedded[1]);
+    if (fromEmbedded) return formatDateIso(fromEmbedded);
+  }
+
+  return value.trim();
 }

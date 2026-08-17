@@ -7,8 +7,8 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
-const ACCEPTED = ".pdf,.xlsx,.xls";
-const ACCEPTED_EXT = new Set([".pdf", ".xlsx", ".xls"]);
+const ACCEPTED = ".pdf,.xlsx,.xls,.csv";
+const ACCEPTED_EXT = new Set([".pdf", ".xlsx", ".xls", ".csv"]);
 export const MAX_FILES = 25;
 export const MAX_FILE_SIZE_MB = 10;
 
@@ -38,7 +38,7 @@ export function FileDropzone({ files, onChange, disabled }: FileDropzoneProps) {
 
       for (const file of Array.from(incoming)) {
         if (!isAllowed(file)) {
-          errors.push(`${file.name}: only PDF and Excel are allowed`);
+          errors.push(`${file.name}: only PDF, Excel, and CSV are allowed`);
           continue;
         }
         if (file.size > MAX_FILE_SIZE_MB * 1024 * 1024) {
@@ -103,11 +103,11 @@ export function FileDropzone({ files, onChange, disabled }: FileDropzoneProps) {
         </div>
         <div className="space-y-1">
           <p className="text-sm font-medium">
-            Drag & drop PDF or Excel statements here
+            Drag & drop PDF, Excel, or CSV statements here
           </p>
           <p className="text-muted-foreground text-xs">
             Or click to browse · up to {MAX_FILES} files · {MAX_FILE_SIZE_MB}MB
-            each · .pdf .xlsx .xls
+            each · .pdf .xlsx .xls .csv
           </p>
         </div>
         <input

@@ -46,12 +46,14 @@ export async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> 
   return response.json() as Promise<T>;
 }
 
-export async function extractStatement(
-  file: File,
+export async function extractStatements(
+  files: File[],
   expectedType?: StatementType
 ): Promise<ExtractResponse> {
   const form = new FormData();
-  form.append("file", file);
+  for (const file of files) {
+    form.append("files", file);
+  }
   if (expectedType) {
     form.append("expected_type", expectedType);
   }
@@ -66,4 +68,11 @@ export async function extractStatement(
   }
 
   return response.json() as Promise<ExtractResponse>;
+}
+
+export async function extractStatement(
+  file: File,
+  expectedType?: StatementType
+): Promise<ExtractResponse> {
+  return extractStatements([file], expectedType);
 }
