@@ -15,6 +15,21 @@ export type ExtractResponse = {
   opening_balance: number | null;
   closing_balance: number | null;
   transactions: Transaction[];
+  statements?: StatementSummary[];
+  warnings?: string[];
+};
+
+export type StatementSummary = {
+  source_file: string;
+  bank: string;
+  account_last4: string;
+  period_start: string;
+  period_end: string;
+  opening_balance: number | null;
+  closing_balance: number | null;
+  total_deposits: number;
+  total_withdrawals: number;
+  transaction_count: number;
 };
 
 async function parseError(response: Response): Promise<string> {

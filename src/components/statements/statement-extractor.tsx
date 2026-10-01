@@ -71,6 +71,9 @@ export function StatementExtractor() {
           }`
         );
       }
+      for (const warning of result.warnings ?? []) {
+        toast.warning(warning);
+      }
     } catch (err) {
       const message = err instanceof Error ? err.message : "Extraction failed";
       toast.error(message);
@@ -86,8 +89,8 @@ export function StatementExtractor() {
           Statement Extractor
         </h1>
         <p className="text-muted-foreground text-sm">
-          Upload bank or credit card statements (PDF / Excel / CSV). Rows are
-          parsed in code, then classified in one agent call.
+          Upload bank statements (PDF / Excel / CSV). Rows are parsed in code
+          and checked against the statement&apos;s own totals — no AI involved.
         </p>
       </div>
 
@@ -95,8 +98,8 @@ export function StatementExtractor() {
         <CardHeader>
           <CardTitle className="text-base">Upload statements</CardTitle>
           <CardDescription>
-            All files in a batch must be the same type (all bank or all credit
-            card). Every file is parsed first, then sent together to the agent.
+            All files in a batch must be from the same account. A statement that
+            does not reconcile to its printed balances is rejected.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
